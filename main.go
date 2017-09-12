@@ -143,7 +143,6 @@ func dumpRooms(api *slack.Client, dir string, rooms []string) {
 			channel.LastRead = group.LastRead
 			channel.Latest = group.Latest
 			channel.Members = group.Members
-			channel.NumMembers = group.NumMembers
 			channel.Purpose = group.Purpose
 			channel.Topic = group.Topic
 			channel.UnreadCount = group.UnreadCount
