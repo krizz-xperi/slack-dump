@@ -47,7 +47,7 @@ func main() {
 			cli.ShowAppHelp(c)
 			os.Exit(2)
 		}
-		rooms := c.Args()
+		roomsOrUsers := c.Args()
 		api := slack.New(token)
 		_, err := api.AuthTest()
 		if err != nil {
@@ -60,10 +60,10 @@ func main() {
 		check(err)
 
 		// Dump Users
-		dumpUsers(api, dir)
+		dumpUsers(api, dir, roomsOrUsers)
 
 		// Dump Channels and Groups
-		dumpRooms(api, dir, rooms)
+		dumpRooms(api, dir, roomsOrUsers)
 
 		archive(dir)
 	}
@@ -96,7 +96,7 @@ func MarshalIndent(v interface{}, prefix string, indent string) ([]byte, error) 
 	return b, nil
 }
 
-func dumpUsers(api *slack.Client, dir string) {
+func dumpUsers(api *slack.Client, dir string, requestedUsers []string) {
 	fmt.Println("dump user information")
 	users, err := api.GetUsers()
 	check(err)
@@ -110,8 +110,23 @@ func dumpUsers(api *slack.Client, dir string) {
 	ims, err := api.GetIMChannels()
 	//fmt.Println(ims)
 
+	var usersToDump [] slack.User
+
+	if len(requestedUsers) > 0 {
+		usersToDump = FilterUsers(users, func(user slack.User) bool {
+			for _, rUser := range requestedUsers {
+				if rUser == user.Name {
+					return true
+				}
+			}
+			return false
+		})
+	} else {
+		usersToDump = users
+	}
+
 	for _, im := range ims {
-		for _, user := range users {
+		for _, user := range usersToDump {
 			if im.User == user.ID{
 				fmt.Println("dump DM with " + user.Name)
 				dumpChannel(api, dir, im.ID, user.Name, "dm")
