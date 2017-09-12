@@ -216,13 +216,13 @@ func dumpChannel(api *slack.Client, dir, id, name, channelType string) {
 	var messages []slack.Message
 	var channelPath string
 	if channelType == "group" {
-		channelPath = path.Join("private_channel", name)
+		channelPath = "private_channel"
 		messages = fetchGroupHistory(api, id)
 	} else if channelType == "dm" {
-		channelPath = path.Join("direct_message", name)
+		channelPath = "direct_message"
 		messages = fetchDirectMessageHistory(api, id)
 	} else {
-		channelPath = path.Join("channel", name)
+		channelPath = "channel"
 		messages = fetchChannelHistory(api, id)
 	}
 
@@ -232,20 +232,7 @@ func dumpChannel(api *slack.Client, dir, id, name, channelType string) {
 
 	sort.Sort(byTimestamp(messages))
 
-	currentFilename := ""
-	var currentMessages []slack.Message
-	for _, message := range messages {
-		ts := parseTimestamp(message.Timestamp)
-		filename := fmt.Sprintf("%d-%02d-%02d.json", ts.Year(), ts.Month(), ts.Day())
-		if currentFilename != filename {
-			writeMessagesFile(currentMessages, dir, channelPath, currentFilename)
-			currentMessages = make([]slack.Message, 0, 5)
-			currentFilename = filename
-		}
-
-		currentMessages = append(currentMessages, message)
-	}
-	writeMessagesFile(currentMessages, dir, channelPath, currentFilename)
+	writeMessagesFile(messages, dir, channelPath, fmt.Sprintf("%s.json", name))
 }
 
 func writeMessagesFile(messages []slack.Message, dir string, channelPath string, filename string) {
