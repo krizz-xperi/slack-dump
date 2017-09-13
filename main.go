@@ -35,6 +35,10 @@ func main() {
 			Usage:  "a Slack API token: (see: https://api.slack.com/web)",
 			EnvVar: "SLACK_API_TOKEN",
 		},
+		cli.BoolFlag{
+			Name:   "text, x",
+			Usage:  "Output plain text instead of json files.",
+		},
 	}
 	app.Author = "Joe Fitzgerald, Sunyong Lim"
 	app.Email = "jfitzgerald@pivotal.io, dicebattle@gmail.com"
@@ -47,6 +51,7 @@ func main() {
 			cli.ShowAppHelp(c)
 			os.Exit(2)
 		}
+		textOutput := c.Bool("text")
 		roomsOrUsers := c.Args()
 		api := slack.New(token)
 		_, err := api.AuthTest()
@@ -60,10 +65,10 @@ func main() {
 		check(err)
 
 		// Dump Users
-		dumpUsers(api, dir, roomsOrUsers)
+		dumpUsers(api, dir, roomsOrUsers, textOutput)
 
 		// Dump Channels and Groups
-		dumpRooms(api, dir, roomsOrUsers)
+		dumpRooms(api, dir, roomsOrUsers, textOutput)
 
 		archive(dir)
 	}
@@ -96,7 +101,7 @@ func MarshalIndent(v interface{}, prefix string, indent string) ([]byte, error) 
 	return b, nil
 }
 
-func dumpUsers(api *slack.Client, dir string, requestedUsers []string) {
+func dumpUsers(api *slack.Client, dir string, requestedUsers []string, textOutput bool) {
 	fmt.Println("dump user information")
 	users, err := api.GetUsers()
 	check(err)
@@ -112,7 +117,7 @@ func dumpUsers(api *slack.Client, dir string, requestedUsers []string) {
 
 	var usersToDump [] slack.User
 
-	if len(requestedUsers) > 0 {
+	if len(requestedUsers) > 0 && requestedUsers[0] != "@" {
 		usersToDump = FilterUsers(users, func(user slack.User) bool {
 			for _, rUser := range requestedUsers {
 				if rUser == user.Name {
@@ -129,20 +134,20 @@ func dumpUsers(api *slack.Client, dir string, requestedUsers []string) {
 		for _, user := range usersToDump {
 			if im.User == user.ID{
 				fmt.Println("dump DM with " + user.Name)
-				dumpChannel(api, dir, im.ID, user.Name, "dm")
+				dumpChannel(api, dir, im.ID, user.Name, "dm", textOutput)
 			}
 		}
 	}
 }
 
-func dumpRooms(api *slack.Client, dir string, rooms []string) {
+func dumpRooms(api *slack.Client, dir string, rooms []string, textOutput bool) {
 	// Dump Channels
 	fmt.Println("dump public channel")
-	channels := dumpChannels(api, dir, rooms)
+	channels := dumpChannels(api, dir, rooms, textOutput)
 
 	// Dump Private Groups
 	fmt.Println("dump private channel")
-	groups := dumpGroups(api, dir, rooms)
+	groups := dumpGroups(api, dir, rooms, textOutput)
 
 	if len(groups) > 0 {
 		for _, group := range groups {
@@ -172,7 +177,7 @@ func dumpRooms(api *slack.Client, dir string, rooms []string) {
 	check(err)
 }
 
-func dumpChannels(api *slack.Client, dir string, rooms []string) []slack.Channel {
+func dumpChannels(api *slack.Client, dir string, rooms []string, textOutput bool) []slack.Channel {
 	channels, err := api.GetChannels(false)
 	check(err)
 
@@ -194,13 +199,13 @@ func dumpChannels(api *slack.Client, dir string, rooms []string) []slack.Channel
 
 	for _, channel := range channels {
 		fmt.Println("dump channel " + channel.Name)
-		dumpChannel(api, dir, channel.ID, channel.Name, "channel")
+		dumpChannel(api, dir, channel.ID, channel.Name, "channel", textOutput)
 	}
 
 	return channels
 }
 
-func dumpGroups(api *slack.Client, dir string, rooms []string) []slack.Group {
+func dumpGroups(api *slack.Client, dir string, rooms []string, textOutput bool) []slack.Group {
 	groups, err := api.GetGroups(false)
 	check(err)
 	if len(rooms) > 0 {
@@ -221,13 +226,13 @@ func dumpGroups(api *slack.Client, dir string, rooms []string) []slack.Group {
 
 	for _, group := range groups {
 		fmt.Println("dump channel " + group.Name)
-		dumpChannel(api, dir, group.ID, group.Name, "group")
+		dumpChannel(api, dir, group.ID, group.Name, "group", textOutput)
 	}
 
 	return groups
 }
 
-func dumpChannel(api *slack.Client, dir, id, name, channelType string) {
+func dumpChannel(api *slack.Client, dir, id, name, channelType string, textOutput bool) {
 	var messages []slack.Message
 	var channelPath string
 	if channelType == "group" {
@@ -247,10 +252,17 @@ func dumpChannel(api *slack.Client, dir, id, name, channelType string) {
 
 	sort.Sort(byTimestamp(messages))
 
-	writeMessagesFile(messages, dir, channelPath, fmt.Sprintf("%s.json", name))
+	ext := ""
+	if textOutput {
+		ext = ".txt"
+	} else {
+		ext = ".json"
+	}
+
+	writeMessagesFile(messages, dir, channelPath, fmt.Sprintf("%s%s", name, ext), textOutput)
 }
 
-func writeMessagesFile(messages []slack.Message, dir string, channelPath string, filename string) {
+func writeMessagesFile(messages []slack.Message, dir string, channelPath string, filename string, textOutput bool) {
 	if len(messages) == 0 || dir == "" || channelPath == "" || filename == "" {
 		return
 	}
@@ -258,8 +270,19 @@ func writeMessagesFile(messages []slack.Message, dir string, channelPath string,
 	err := os.MkdirAll(channelDir, 0755)
 	check(err)
 
-	data, err := MarshalIndent(messages, "", "    ")
-	check(err)
+	var data []byte
+
+	if textOutput {
+		sdata := ""
+		for _, msg := range messages {
+			sdata += fmt.Sprintf("%s: %s\n", parseTimestamp(msg.Timestamp), msg.Text)
+		}
+		data = []byte(sdata)
+	} else {
+		data, err = MarshalIndent(messages, "", "    ")
+		check(err)
+	}
+
 	err = ioutil.WriteFile(path.Join(channelDir, filename), data, 0644)
 	check(err)
 }
