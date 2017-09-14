@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -65,10 +66,10 @@ func main() {
 		check(err)
 
 		// Dump Users
-		dumpUsers(api, dir, roomsOrUsers, textOutput)
+		usersMap := dumpUsers(api, dir, roomsOrUsers, textOutput)
 
 		// Dump Channels and Groups
-		dumpRooms(api, dir, roomsOrUsers, textOutput)
+		dumpRooms(api, dir, roomsOrUsers, usersMap, textOutput)
 
 		archive(dir)
 	}
@@ -101,7 +102,14 @@ func MarshalIndent(v interface{}, prefix string, indent string) ([]byte, error) 
 	return b, nil
 }
 
-func dumpUsers(api *slack.Client, dir string, requestedUsers []string, textOutput bool) {
+type UserInfo struct {
+	Login string
+	RealName string
+}
+
+type UsersMap map[string]*UserInfo
+
+func dumpUsers(api *slack.Client, dir string, requestedUsers []string, textOutput bool) UsersMap {
 	fmt.Println("dump user information")
 	users, err := api.GetUsers()
 	check(err)
@@ -130,24 +138,31 @@ func dumpUsers(api *slack.Client, dir string, requestedUsers []string, textOutpu
 		usersToDump = users
 	}
 
+	usersMap := make(UsersMap)
+	for _, user := range users {
+		usersMap[user.ID] = &UserInfo { user.Name, user.RealName }
+	}
+
 	for _, im := range ims {
 		for _, user := range usersToDump {
 			if im.User == user.ID{
 				fmt.Println("dump DM with " + user.Name)
-				dumpChannel(api, dir, im.ID, user.Name, "dm", textOutput)
+				dumpChannel(api, dir, im.ID, user.Name, "dm", usersMap, textOutput)
 			}
 		}
 	}
+
+	return usersMap
 }
 
-func dumpRooms(api *slack.Client, dir string, rooms []string, textOutput bool) {
+func dumpRooms(api *slack.Client, dir string, rooms []string, usersMap UsersMap, textOutput bool) {
 	// Dump Channels
 	fmt.Println("dump public channel")
-	channels := dumpChannels(api, dir, rooms, textOutput)
+	channels := dumpChannels(api, dir, rooms, usersMap, textOutput)
 
 	// Dump Private Groups
 	fmt.Println("dump private channel")
-	groups := dumpGroups(api, dir, rooms, textOutput)
+	groups := dumpGroups(api, dir, rooms, usersMap, textOutput)
 
 	if len(groups) > 0 {
 		for _, group := range groups {
@@ -177,7 +192,7 @@ func dumpRooms(api *slack.Client, dir string, rooms []string, textOutput bool) {
 	check(err)
 }
 
-func dumpChannels(api *slack.Client, dir string, rooms []string, textOutput bool) []slack.Channel {
+func dumpChannels(api *slack.Client, dir string, rooms []string, usersMap UsersMap, textOutput bool) []slack.Channel {
 	channels, err := api.GetChannels(false)
 	check(err)
 
@@ -199,13 +214,13 @@ func dumpChannels(api *slack.Client, dir string, rooms []string, textOutput bool
 
 	for _, channel := range channels {
 		fmt.Println("dump channel " + channel.Name)
-		dumpChannel(api, dir, channel.ID, channel.Name, "channel", textOutput)
+		dumpChannel(api, dir, channel.ID, channel.Name, "channel", usersMap, textOutput)
 	}
 
 	return channels
 }
 
-func dumpGroups(api *slack.Client, dir string, rooms []string, textOutput bool) []slack.Group {
+func dumpGroups(api *slack.Client, dir string, rooms []string, usersMap UsersMap, textOutput bool) []slack.Group {
 	groups, err := api.GetGroups(false)
 	check(err)
 	if len(rooms) > 0 {
@@ -226,13 +241,13 @@ func dumpGroups(api *slack.Client, dir string, rooms []string, textOutput bool) 
 
 	for _, group := range groups {
 		fmt.Println("dump channel " + group.Name)
-		dumpChannel(api, dir, group.ID, group.Name, "group", textOutput)
+		dumpChannel(api, dir, group.ID, group.Name, "group", usersMap, textOutput)
 	}
 
 	return groups
 }
 
-func dumpChannel(api *slack.Client, dir, id, name, channelType string, textOutput bool) {
+func dumpChannel(api *slack.Client, dir, id, name, channelType string, usersMap UsersMap, textOutput bool) {
 	var messages []slack.Message
 	var channelPath string
 	if channelType == "group" {
@@ -259,10 +274,17 @@ func dumpChannel(api *slack.Client, dir, id, name, channelType string, textOutpu
 		ext = ".json"
 	}
 
-	writeMessagesFile(messages, dir, channelPath, fmt.Sprintf("%s%s", name, ext), textOutput)
+	writeMessagesFile(messages, dir, channelPath, fmt.Sprintf("%s%s", name, ext), usersMap, textOutput)
 }
 
-func writeMessagesFile(messages []slack.Message, dir string, channelPath string, filename string, textOutput bool) {
+var mentionRE = regexp.MustCompile("<@[0-9A-Z]+>")
+
+func sameDay(t1, t2 *time.Time) bool {
+	return t1.Year() == t2.Year() && t1.YearDay() == t2.YearDay()
+}
+
+func writeMessagesFile(messages []slack.Message, dir string, channelPath string, filename string, usersMap UsersMap,
+	                   textOutput bool) {
 	if len(messages) == 0 || dir == "" || channelPath == "" || filename == "" {
 		return
 	}
@@ -274,8 +296,31 @@ func writeMessagesFile(messages []slack.Message, dir string, channelPath string,
 
 	if textOutput {
 		sdata := ""
+		lastTimestamp := time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC)
 		for _, msg := range messages {
-			sdata += fmt.Sprintf("%s: %s\n", parseTimestamp(msg.Timestamp), msg.Text)
+			timestamp := parseTimestamp(msg.Timestamp)
+			if !sameDay(timestamp, &lastTimestamp) {
+				sdata += fmt.Sprintf("\n----------------   %s    ----------------\n",
+					                 timestamp.Format("Monday, Jan 2 2006"))
+			}
+			lastTimestamp = *timestamp
+
+			userName, foundUser := usersMap[msg.User]
+			if !foundUser { userName = &UserInfo{ msg.User, msg.User} }
+			text := mentionRE.ReplaceAllStringFunc(msg.Text, func (t string) string {
+				userName, foundUser := usersMap[t[2:len(t)-1]]
+				if !foundUser { userName = &UserInfo{ msg.User, msg.User} }
+				if msg.SubType != "" {
+					return fmt.Sprintf("%s", userName.RealName)
+				} else {
+					return fmt.Sprintf("@%s", userName.Login)
+				}
+			})
+			if msg.SubType == "" {
+				sdata += fmt.Sprintf("[%s] %s: %s\n", timestamp.Format("15:04:05"), userName.RealName, text)
+			} else {
+				sdata += fmt.Sprintf("[%s] %s\n", timestamp.Format("15:04:05"), text)
+			}
 		}
 		data = []byte(sdata)
 	} else {
