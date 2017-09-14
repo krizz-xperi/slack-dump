@@ -26,6 +26,7 @@ GLOBAL OPTIONS:
    --token, -t 		a Slack API token: (see: https://api.slack.com/web) [$SLACK_API_TOKEN]
    --help, -h		show help
    --version, -v	print the version
+   --text, -x		do the plain text dump too
 ```
 
 ### Export All Channels And Private Groups
