@@ -331,7 +331,21 @@ func writeMessagesFile(messages []slack.Message, dir string, channelPath string,
 	check(err)
 }
 
+const fetchSleep = time.Minute / 2
+const fetchesBetweenSleeps = 50
+var fetchInvocationCount = 0
+
+func sleepBeforeFetchIfNeeded() {
+	fetchInvocationCount += 1
+	if fetchInvocationCount % fetchesBetweenSleeps == 0 {
+		fmt.Println("... sleeping for a bit to avoid '429 Too Many Requests' error from slack server ...")
+		time.Sleep(fetchSleep)
+	}
+}
+
 func fetchGroupHistory(api *slack.Client, ID string) []slack.Message {
+	sleepBeforeFetchIfNeeded()
+
 	historyParams := slack.NewHistoryParameters()
 	historyParams.Count = 1000
 
@@ -360,6 +374,8 @@ func fetchGroupHistory(api *slack.Client, ID string) []slack.Message {
 }
 
 func fetchChannelHistory(api *slack.Client, ID string) []slack.Message {
+	sleepBeforeFetchIfNeeded()
+
 	historyParams := slack.NewHistoryParameters()
 	historyParams.Count = 1000
 
@@ -388,6 +404,8 @@ func fetchChannelHistory(api *slack.Client, ID string) []slack.Message {
 }
 
 func fetchDirectMessageHistory(api *slack.Client, ID string) []slack.Message {
+	sleepBeforeFetchIfNeeded()
+
 	historyParams := slack.NewHistoryParameters()
 	historyParams.Count = 1000
 
