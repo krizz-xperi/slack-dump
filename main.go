@@ -267,14 +267,7 @@ func dumpChannel(api *slack.Client, dir, id, name, channelType string, usersMap 
 
 	sort.Sort(byTimestamp(messages))
 
-	ext := ""
-	if textOutput {
-		ext = ".txt"
-	} else {
-		ext = ".json"
-	}
-
-	writeMessagesFile(messages, dir, channelPath, fmt.Sprintf("%s%s", name, ext), usersMap, textOutput)
+	writeMessagesFile(messages, dir, channelPath, name, usersMap, textOutput)
 }
 
 var mentionRE = regexp.MustCompile("<@[0-9A-Z]+>")
@@ -322,13 +315,16 @@ func writeMessagesFile(messages []slack.Message, dir string, channelPath string,
 				sdata += fmt.Sprintf("[%s] %s\n", timestamp.Format("15:04:05"), text)
 			}
 		}
-		data = []byte(sdata)
-	} else {
-		data, err = MarshalIndent(messages, "", "    ")
+
+		err = ioutil.WriteFile(path.Join(channelDir, filename + ".txt"), []byte(sdata), 0644)
 		check(err)
 	}
 
-	err = ioutil.WriteFile(path.Join(channelDir, filename), data, 0644)
+
+	data, err = MarshalIndent(messages, "", "    ")
+	check(err)
+
+	err = ioutil.WriteFile(path.Join(channelDir, filename + ".json"), data, 0644)
 	check(err)
 }
 
