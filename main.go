@@ -199,7 +199,10 @@ func dumpChannels(api *slack.Client, dir string, rooms []string, usersMap UsersM
 	if len(rooms) > 0 {
 		channels = FilterChannels(channels, func(channel slack.Channel) bool {
 			for _, room := range rooms {
-				if room == channel.Name {
+				if len(room) > 0 && room[0] == '%' {
+					re := regexp.MustCompile(room[1:])
+					if re.MatchString(channel.Name) { return true }
+				} else if room == channel.Name {
 					return true
 				}
 			}
